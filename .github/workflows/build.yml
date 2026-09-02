@@ -6,7 +6,7 @@ on:
       gradle_task:
         description: 'Gradle 构建任务'
         required: false
-        default: 'assembleRelease'
+        default: 'assembleDebug'
         type: choice
         options:
           - assembleRelease
@@ -35,8 +35,8 @@ jobs:
 
       - name: Install SDK components
         run: |
-          sdkmanager --install "build-tools;33.0.2" "platforms;android-33"
-          echo "SDK installed successfully"
+          sdkmanager --install "build-tools;30.0.3" "platforms;android-30"
+          echo "SDK installed"
 
       - name: Fix gradlew permissions
         run: chmod +x ./gradlew
@@ -51,47 +51,40 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Show project structure
-        run: find . -name "*.gradle" -o -name "*.xml" -o -name "*.java" | head -30
+      - name: Debug project structure
+        run: |
+          echo "=== Project Structure ==="
+          find . -type f -name "*.gradle" -o -name "*.xml" -o -name "*.java" | sort
+          echo "=== Gradle Wrapper ==="
+          ls -la gradlew gradle/wrapper/
+          echo "=== Build Files ==="
+          cat build.gradle
+          echo "---"
+          cat settings.gradle
+          echo "---"
+          cat app/build.gradle
 
       - name: Build APK
         run: |
           TASK="${{ inputs.gradle_task || 'assembleDebug' }}"
-          echo "Building with task: $TASK"
-          ./gradlew $TASK --no-daemon 2>&1
-          echo "Build finished"
+          echo "Building: $TASK"
+          ./gradlew $TASK --no-daemon --stacktrace 2>&1 || {
+            echo "BUILD FAILED"
+            exit 1
+          }
+          echo "Build completed successfully"
 
-      - name: List built APKs
+      - name: Find APKs
         run: |
-          find app/build/outputs -name "*.apk" 2>/dev/null
-          ls -la app/build/outputs/apk/*/ 2>/dev/null || true
+          echo "=== Looking for APKs ==="
+          find . -name "*.apk" -type f 2>/dev/null
+          ls -la app/build/outputs/apk/ 2>/dev/null || echo "No apk directory"
+          ls -la app/build/outputs/ 2>/dev/null || echo "No outputs directory"
 
-      - name: Upload Debug APK
-        if: inputs.gradle_task == 'assembleDebug' || inputs.gradle_task == ''
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: apk-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: android-apk
+          path: "**/*.apk"
           retention-days: 7
-
-      - name: Upload Release APK
-        if: inputs.gradle_task == 'assembleRelease'
-        uses: actions/upload-artifact@v4
-        with:
-          name: apk-release
-          path: app/build/outputs/apk/release/*.apk
-          retention-days: 7
-
-      - name: Upload all APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: all-apks
-          path: app/build/outputs/apk/**/*.apk
-          retention-days: 7
-
-      - name: Upload build logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: app/build/reports/
+          if-no-files-found: error
