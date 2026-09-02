@@ -1,7 +1,6 @@
 package com.example.testapp;
 
 import android.app.Activity;
-import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
@@ -19,18 +18,9 @@ import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.fragment.app.Fragment;
 
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.card.MaterialCardView;
-import com.google.android.material.textfield.TextInputEditText;
-
-import org.json.JSONException;
-import org.json.JSONObject;
 
 /**
- * OAuth 登录 Fragment
- * 支持 PKCE 流程 + 手动 Key 输入两种方式
- * 
- * ⚠️ 安全提醒：sk_ 密钥永远不要硬编码在源码中！
- *    正式 App 应从服务端或安全存储获取
+ * OAuth 登录 Fragment - 使用简化 API
  */
 public class AuthFragment extends Fragment {
 
@@ -38,9 +28,8 @@ public class AuthFragment extends Fragment {
     private static final String PREFS_NAME = "pollinations_prefs";
     private static final String KEY_TOKEN = "api_token";
 
-    // TODO: 替换为你的 pk_ App Key（在 https://enter.pollinations.ai/keys 创建）
+    // TODO: 替换为你的 pk_ App Key
     private static final String APP_CLIENT_ID = "pk_your_app_key_here";
-    // TODO: 替换为你的回调 URL
     private static final String APP_REDIRECT_URI = "pollinations-test://callback";
 
     private SharedPreferences prefs;
@@ -79,15 +68,12 @@ public class AuthFragment extends Fragment {
         tvUserInfo = view.findViewById(R.id.tvUserInfo);
         progressBar = view.findViewById(R.id.progressBar);
 
-        // 提示用户填入自己的 Key
         tvApiKey.setHint("在此输入 sk_ 或 pk_ 密钥");
     }
 
     private void setupListeners() {
-        // PKCE 登录按钮
         btnLogin.setOnClickListener(v -> startOAuthFlow());
 
-        // 手动使用 Key 按钮
         btnUseKey.setOnClickListener(v -> {
             String key = tvApiKey.getText().toString().trim();
             if (!key.isEmpty()) {
@@ -100,9 +86,6 @@ public class AuthFragment extends Fragment {
         });
     }
 
-    /**
-     * 启动 PKCE OAuth 流程
-     */
     private void startOAuthFlow() {
         if (APP_CLIENT_ID.equals("pk_your_app_key_here")) {
             Toast.makeText(requireContext(),
@@ -127,9 +110,6 @@ public class AuthFragment extends Fragment {
         setStatus("等待授权...");
     }
 
-    /**
-     * 处理 OAuth 回调
-     */
     public void handleAuthResult(Uri data) {
         if (data == null) return;
 
@@ -146,7 +126,7 @@ public class AuthFragment extends Fragment {
             return;
         }
         if (currentState != null && !currentState.equals(state)) {
-            showError("State 不匹配，可能存在 CSRF 攻击");
+            showError("State 不匹配");
             return;
         }
 
@@ -155,14 +135,22 @@ public class AuthFragment extends Fragment {
             setStatus("正在交换 Token...");
             oauthClient.exchangeCode(code, currentVerifier, new OAuthClient.AuthCallback() {
                 @Override
-                public void onSuccess(JSONObject tokenResponse) {
+                public void onSuccess(String jsonResponse) {
                     try {
-                        String accessToken = tokenResponse.getString("access_token");
-                        long expiresIn = tokenResponse.getLong("expires_in");
-                        saveToken(accessToken);
-                        apiClient = new PollinationsApi(accessToken);
-                        checkKeyInfo();
-                    } catch (JSONException e) {
+                        int tokenStart = jsonResponse.indexOf("\"access_token\":\"");
+                        if (tokenStart >= 0) {
+                            tokenStart += 18;
+                            int tokenEnd = jsonResponse.indexOf("\"", tokenStart);
+                            if (tokenEnd > tokenStart) {
+                                String accessToken = jsonResponse.substring(tokenStart, tokenEnd);
+                                saveToken(accessToken);
+                                apiClient = new PollinationsApi(accessToken);
+                                checkKeyInfo();
+                                return;
+                            }
+                        }
+                        showError("解析 Token 失败");
+                    } catch (Exception e) {
                         showError("解析 Token 失败: " + e.getMessage());
                     }
                 }
@@ -179,19 +167,19 @@ public class AuthFragment extends Fragment {
         if (apiClient == null) return;
         apiClient.getKeyInfo(new PollinationsApi.KeyInfoCallback() {
             @Override
-            public void onSuccess(JSONObject info) {
+            public void onSuccess(String json) {
                 try {
-                    boolean valid = info.getBoolean("valid");
-                    String type = info.optString("type", "");
-                    String name = info.optString("name", "");
-                    String expiresAt = info.optString("expiresAt", "永不过期");
+                    int validStart = json.indexOf("\"valid\":");
+                    boolean valid = json.contains("\"valid\":true");
+                    String type = extractJsonString(json, "\"type\":\"");
+                    String name = extractJsonString(json, "\"name\":\"");
+                    String expiresAt = extractJsonString(json, "\"expiresAt\":\"");
 
                     setStatus(valid ? "✅ 已连接" : "❌ Key 无效");
-                    tvUserInfo.setText("类型: " + type
-                            + (name.isEmpty() ? "" : " | " + name)
+                    tvUserInfo.setText("类型: " + type + (name.isEmpty() ? "" : " | " + name)
                             + " | 过期: " + expiresAt);
-                } catch (JSONException e) {
-                    tvUserInfo.setText(info.optString("message", "Unknown"));
+                } catch (Exception e) {
+                    tvUserInfo.setText(json.length() > 50 ? json.substring(0, 50) : json);
                 }
                 showProgress(false);
             }
@@ -217,6 +205,22 @@ public class AuthFragment extends Fragment {
         prefs.edit().putString(KEY_TOKEN, token).apply();
         tvApiKey.setText(token);
         Toast.makeText(requireContext(), "Token 已保存", Toast.LENGTH_SHORT).show();
+    }
+
+    private String extractJsonString(String json, String key) {
+        try {
+            int start = json.indexOf(key);
+            if (start >= 0) {
+                start += key.length();
+                int end = json.indexOf("\"", start);
+                if (end > start) {
+                    return json.substring(start, end);
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+        return "";
     }
 
     private void setStatus(String text) {

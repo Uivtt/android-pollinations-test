@@ -4,60 +4,40 @@ import android.content.Context;
 import android.net.Uri;
 import android.util.Log;
 
-import org.json.JSONException;
-import org.json.JSONObject;
-
-import java.io.IOException;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import okhttp3.Call;
-import okhttp3.Callback;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-
 /**
- * Pollinations AI OAuth 客户端
- * 实现 RFC 6749 Authorization Code Flow with PKCE
+ * Pollinations AI OAuth 客户端 - 使用 Java 标准库
  */
 public class OAuthClient {
 
     private static final String TAG = "OAuthClient";
-
-    // Pollinations OAuth 端点（从 discovery 获取）
     private static final String AUTHORIZATION_ENDPOINT =
             "https://enter.pollinations.ai/authorize";
     private static final String TOKEN_ENDPOINT =
             "https://enter.pollinations.ai/api/oauth/token";
-    private static final String USERINFO_ENDPOINT =
-            "https://enter.pollinations.ai/api/oauth/userinfo";
 
     private final String clientId;
     private final String redirectUri;
     private final String scopes;
-    private final OkHttpClient httpClient;
     private final ExecutorService executor;
 
     public OAuthClient(Context context, String clientId, String redirectUri, String scopes) {
         this.clientId = clientId;
         this.redirectUri = redirectUri;
         this.scopes = scopes;
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                .build();
         this.executor = Executors.newSingleThreadExecutor();
     }
 
-    /**
-     * 构建授权 URL，用于 Chrome Custom Tabs 打开
-     */
     public AuthRequest buildAuthRequest() {
         String verifier = PKCEHelper.generateVerifier();
         String challenge = PKCEHelper.generateChallenge(verifier);
@@ -78,9 +58,6 @@ public class OAuthClient {
         return new AuthRequest(builder.build().toString(), verifier, state);
     }
 
-    /**
-     * 用授权码换取 access token（sk_ key）
-     */
     public void exchangeCode(String code, String verifier, AuthCallback callback) {
         executor.execute(() -> {
             try {
@@ -90,25 +67,33 @@ public class OAuthClient {
                         + "&redirect_uri=" + URLEncoder.encode(redirectUri, "UTF-8")
                         + "&code_verifier=" + URLEncoder.encode(verifier, "UTF-8");
 
-                Request request = new Request.Builder()
-                        .url(TOKEN_ENDPOINT)
-                        .post(RequestBody.create(body.getBytes(StandardCharsets.UTF_8),
-                                MediaType.get("application/x-www-form-urlencoded")))
-                        .build();
+                URL url = new URL(TOKEN_ENDPOINT);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
 
-                try (Response response = httpClient.newCall(request).execute()) {
-                    if (response.body() != null) {
-                        String json = response.body().string();
-                        JSONObject result = new JSONObject(json);
-                        if (result.has("access_token")) {
-                            callback.onSuccess(result);
-                        } else {
-                            callback.onError(result.optString("error", "Unknown error")
-                                    + ": " + result.optString("error_description", ""));
-                        }
-                    } else {
-                        callback.onError("Empty response: " + response.code());
-                    }
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(body.getBytes(StandardCharsets.UTF_8));
+                }
+
+                int responseCode = conn.getResponseCode();
+                BufferedReader reader = new BufferedReader(new InputStreamReader(
+                        responseCode >= 200 && responseCode < 300 ? conn.getInputStream() : conn.getErrorStream()));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+                reader.close();
+
+                String response = sb.toString();
+                Log.d(TAG, "Token response: " + responseCode + " - " + response);
+                
+                if (responseCode == 200) {
+                    callback.onSuccess(response);
+                } else {
+                    callback.onError("HTTP " + responseCode + ": " + response);
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Token exchange failed", e);
@@ -117,38 +102,8 @@ public class OAuthClient {
         });
     }
 
-    /**
-     * 获取当前用户信息（需要有效 token）
-     */
-    public void getUserInfo(String accessToken, UserInfoCallback callback) {
-        executor.execute(() -> {
-            try {
-                Request request = new Request.Builder()
-                        .url(USERINFO_ENDPOINT)
-                        .addHeader("Authorization", "Bearer " + accessToken)
-                        .get()
-                        .build();
-
-                try (Response response = httpClient.newCall(request).execute()) {
-                    if (response.body() != null) {
-                        callback.onSuccess(response.body().string());
-                    } else {
-                        callback.onError("Empty userinfo response: " + response.code());
-                    }
-                }
-            } catch (Exception e) {
-                callback.onError(e.getMessage());
-            }
-        });
-    }
-
     public interface AuthCallback {
-        void onSuccess(JSONObject tokenResponse);
-        void onError(String message);
-    }
-
-    public interface UserInfoCallback {
-        void onSuccess(String userInfo);
+        void onSuccess(String jsonResponse);
         void onError(String message);
     }
 
