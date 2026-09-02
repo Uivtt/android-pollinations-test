@@ -1,16 +1,14 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 33
-    
+    compileSdkVersion 30
     defaultConfig {
-        applicationId "com.example.testapp"
-        minSdkVersion 24
-        targetSdkVersion 33
+        applicationId "com.test.app"
+        minSdkVersion 21
+        targetSdkVersion 30
         versionCode 1
         versionName "1.0"
     }
-    
     buildTypes {
         release {
             minifyEnabled false
@@ -19,5 +17,4 @@ android {
 }
 
 dependencies {
-    implementation 'androidx.appcompat:appcompat:1.6.1'
 }
