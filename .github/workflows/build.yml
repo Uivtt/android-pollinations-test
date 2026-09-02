@@ -54,18 +54,40 @@ jobs:
       - name: Show project structure
         run: find . -name "*.gradle" -o -name "*.xml" -o -name "*.java" | head -30
 
-      - name: Build APK with debug output
+      - name: Build APK
         run: |
-          ./gradlew ${{ inputs.gradle_task || 'assembleDebug' }} --no-daemon --stacktrace 2>&1 || true
+          TASK="${{ inputs.gradle_task || 'assembleDebug' }}"
+          echo "Building with task: $TASK"
+          ./gradlew $TASK --no-daemon 2>&1
           echo "Build finished"
 
-      - name: Upload APK
+      - name: List built APKs
+        run: |
+          find app/build/outputs -name "*.apk" 2>/dev/null
+          ls -la app/build/outputs/apk/*/ 2>/dev/null || true
+
+      - name: Upload Debug APK
+        if: inputs.gradle_task == 'assembleDebug' || inputs.gradle_task == ''
         uses: actions/upload-artifact@v4
         with:
           name: apk-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 7
-          if-no-files-found: warn
+
+      - name: Upload Release APK
+        if: inputs.gradle_task == 'assembleRelease'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-release
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 7
+
+      - name: Upload all APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-apks
+          path: app/build/outputs/apk/**/*.apk
+          retention-days: 7
 
       - name: Upload build logs on failure
         if: failure()
