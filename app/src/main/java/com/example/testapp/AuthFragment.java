@@ -9,7 +9,6 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AutoCompleteTextView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -21,6 +20,7 @@ import androidx.fragment.app.Fragment;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.textfield.TextInputEditText;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -28,17 +28,20 @@ import org.json.JSONObject;
 /**
  * OAuth 登录 Fragment
  * 支持 PKCE 流程 + 手动 Key 输入两种方式
+ * 
+ * ⚠️ 安全提醒：sk_ 密钥永远不要硬编码在源码中！
+ *    正式 App 应从服务端或安全存储获取
  */
 public class AuthFragment extends Fragment {
 
     private static final String TAG = "AuthFragment";
     private static final String PREFS_NAME = "pollinations_prefs";
     private static final String KEY_TOKEN = "api_token";
-    private static final String KEY_CLIENT_ID = "client_id";
-    private static final String KEY_REDIRECT_URI = "redirect_uri";
 
-    // 测试用：直接使用的 sk_ key
-    private static final String TEST_SK_KEY = "sk_kmV4qU62rJM3eJ0FpPX4Eu8juPKwZR0Z";
+    // TODO: 替换为你的 pk_ App Key（在 https://enter.pollinations.ai/keys 创建）
+    private static final String APP_CLIENT_ID = "pk_your_app_key_here";
+    // TODO: 替换为你的回调 URL
+    private static final String APP_REDIRECT_URI = "pollinations-test://callback";
 
     private SharedPreferences prefs;
     private OAuthClient oauthClient;
@@ -76,8 +79,8 @@ public class AuthFragment extends Fragment {
         tvUserInfo = view.findViewById(R.id.tvUserInfo);
         progressBar = view.findViewById(R.id.progressBar);
 
-        // 预填测试 key
-        tvApiKey.setText(TEST_SK_KEY);
+        // 提示用户填入自己的 Key
+        tvApiKey.setHint("在此输入 sk_ 或 pk_ 密钥");
     }
 
     private void setupListeners() {
@@ -101,21 +104,20 @@ public class AuthFragment extends Fragment {
      * 启动 PKCE OAuth 流程
      */
     private void startOAuthFlow() {
-        // TODO: 在实际 App 中从 enter.pollinations.ai/keys 获取 pk_ key
-        String clientId = "pk_test_placeholder";
-        String redirectUri = "pollinations-test://callback";
+        if (APP_CLIENT_ID.equals("pk_your_app_key_here")) {
+            Toast.makeText(requireContext(),
+                    "请先在代码中配置你的 pk_ App Key",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
 
-        oauthClient = new OAuthClient(requireContext(), clientId, redirectUri, "profile usage keys");
+        oauthClient = new OAuthClient(requireContext(),
+                APP_CLIENT_ID, APP_REDIRECT_URI, "profile usage keys");
         OAuthClient.AuthRequest authRequest = oauthClient.buildAuthRequest();
 
         currentVerifier = authRequest.verifier;
         currentState = authRequest.state;
 
-        Log.d(TAG, "Auth URL: " + authRequest.authUrl);
-        Log.d(TAG, "Verifier (save for callback): " + currentVerifier);
-        Log.d(TAG, "State: " + currentState);
-
-        // 打开 Chrome Custom Tabs
         new CustomTabsIntent.Builder()
                 .setShareState(CustomTabsIntent.SHARE_STATE_OFF)
                 .build()
@@ -139,12 +141,10 @@ public class AuthFragment extends Fragment {
             showError("授权失败: " + error);
             return;
         }
-
         if (code == null) {
             showError("未收到授权码");
             return;
         }
-
         if (currentState != null && !currentState.equals(state)) {
             showError("State 不匹配，可能存在 CSRF 攻击");
             return;
@@ -175,9 +175,6 @@ public class AuthFragment extends Fragment {
         }
     }
 
-    /**
-     * 检查 Key 信息
-     */
     private void checkKeyInfo() {
         if (apiClient == null) return;
         apiClient.getKeyInfo(new PollinationsApi.KeyInfoCallback() {
@@ -190,7 +187,8 @@ public class AuthFragment extends Fragment {
                     String expiresAt = info.optString("expiresAt", "永不过期");
 
                     setStatus(valid ? "✅ 已连接" : "❌ Key 无效");
-                    tvUserInfo.setText("类型: " + type + (name.isEmpty() ? "" : " | " + name)
+                    tvUserInfo.setText("类型: " + type
+                            + (name.isEmpty() ? "" : " | " + name)
                             + " | 过期: " + expiresAt);
                 } catch (JSONException e) {
                     tvUserInfo.setText(info.optString("message", "Unknown"));
