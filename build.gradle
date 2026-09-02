@@ -1,1 +1,1 @@
-// Top-level build file
+apply plugin: 'com.android.application'
