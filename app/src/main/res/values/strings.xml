@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AndroidTest</string>
+    <string name="hello_world">Hello World!</string>
+    <string name="description">这是一个简单的 Android 测试应用，用于验证远程构建流程。</string>
+</resources>
